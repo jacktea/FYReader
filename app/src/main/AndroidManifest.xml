@@ -52,7 +52,6 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
 
-
             <meta-data
                     android:name="android.app.shortcuts"
                     android:resource="@xml/shortcuts" />
@@ -89,6 +88,10 @@
         </activity>
         <activity android:name=".ui.activity.FontsActivity"/>
 
+        <activity android:name=".ui.activity.LoginActivity"/>
+
+        <activity android:name=".ui.activity.RegisterActivity"/>
+
         <activity android:name=".ui.activity.CatalogActivity"/>
         <activity android:name=".ui.activity.AboutActivity"/>
 
@@ -98,10 +101,10 @@
         <activity android:name=".ui.activity.MoreSettingActivity"/>
         <activity android:name=".ui.activity.BookstoreActivity"/>
         <activity android:name=".ui.activity.WebDavSettingActivity"/>
+        <activity android:name=".ui.activity.QRCodeScanActivity"/>
 
         <receiver android:name=".util.notification.NotificationClickReceiver"/>
         <receiver android:name=".ui.presenter.BookcasePresenter$cancelDownloadReceiver"/>
-        <service android:name=".model.audio.ReadService"/>
         <service android:name=".model.audio.ReadAloudService"/>
     </application>
 

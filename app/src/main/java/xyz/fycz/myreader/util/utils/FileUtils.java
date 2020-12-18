@@ -1,6 +1,5 @@
 package xyz.fycz.myreader.util.utils;
 
-import android.app.Application;
 import android.content.ContentUris;
 import android.content.Context;
 import android.database.Cursor;
@@ -11,17 +10,32 @@ import android.os.StatFs;
 import android.provider.DocumentsContract;
 import android.provider.MediaStore;
 import android.util.Log;
-import info.monitorenter.cpdetector.io.*;
+
+import org.mozilla.universalchardet.UniversalDetector;
+
+import java.io.BufferedOutputStream;
+import java.io.BufferedReader;
+import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileFilter;
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
+import java.io.FileReader;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.Reader;
+import java.text.DecimalFormat;
+import java.util.ArrayList;
+import java.util.List;
+
 import io.reactivex.Single;
 import io.reactivex.SingleEmitter;
 import io.reactivex.SingleOnSubscribe;
 import xyz.fycz.myreader.application.MyApplication;
+import xyz.fycz.myreader.common.APPCONST;
+import xyz.fycz.myreader.util.IOUtils;
 import xyz.fycz.myreader.util.StringHelper;
-
-import java.io.*;
-import java.text.DecimalFormat;
-import java.util.ArrayList;
-import java.util.List;
 
 
 public class FileUtils {
@@ -31,7 +45,7 @@ public class FileUtils {
     public static final String SUFFIX_TXT = ".txt";
     public static final String SUFFIX_EPUB = ".epub";
     public static final String SUFFIX_PDF = ".pdf";
-
+    public static final byte BLANK = 0x0a;
     //获取文件夹
     public static File getFolder(String filePath){
         File file = new File(filePath);
@@ -213,35 +227,66 @@ public class FileUtils {
     }
 
     /**
-     * 获得文件编码
-     * @param filePath
+     * 获取文件编码
+     * @param file
      * @return
-     * @throws Exception
      */
-    public static String getFileEncode(String filePath) {
-        String charsetName = null;
+    public static String getFileCharset(File file){
+        FileInputStream fis = null;
+        FileInputStream temFis = null;
+        FileOutputStream fos = null;
+        File temFile = null;
         try {
-            File file = new File(filePath);
-            CodepageDetectorProxy detector = CodepageDetectorProxy.getInstance();
-            detector.add(new ParsingDetector(false));
-            detector.add(JChardetFacade.getInstance());
-            detector.add(ASCIIDetector.getInstance());
-            detector.add(UnicodeDetector.getInstance());
-            java.nio.charset.Charset charset = null;
-            charset = detector.detectCodepage(file.toURI().toURL());
-            if (charset != null) {
-                charsetName = charset.name();
-            } else {
-                charsetName = "UTF-8";
+            temFile = getFile(APPCONST.TEM_FILE_DIR + "tem.fy");
+            fis = new FileInputStream(file);
+            fos = new FileOutputStream(temFile);
+            //用10kb作为试探
+            byte[] bytes = new byte[1024 * 10];
+            int len;
+            if ((len = fis.read(bytes)) != -1){
+                fos.write(bytes, 0, len);
             }
-        } catch (Exception ex) {
-            ex.printStackTrace();
-            return null;
+            fos.flush();
+            temFis = new FileInputStream(temFile);
+            String encoding = UniversalDetector.detectCharset(temFis);
+            if (encoding != null) {
+                Log.d("encoding", encoding);
+                return encoding;
+            } else {
+                return "UTF-8";
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+            return "UTF-8";
+        }finally {
+            IOUtils.close(fis, temFis, fos);
+            if (temFile != null) {
+                temFile.delete();
+            }
         }
-        return charsetName;
     }
 
-
+    public static byte[] getBytes(File file) {
+        byte[] buffer = null;
+        FileInputStream fis = null;
+        ByteArrayOutputStream bos = null;
+        try {
+            fis = new FileInputStream(file);
+            bos = new ByteArrayOutputStream(1000);
+            byte[] b = new byte[1000];
+            int n;
+            while ((n = fis.read(b)) != -1) {
+                bos.write(b, 0, n);
+            }
+            bos.flush();
+            buffer = bos.toByteArray();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }finally {
+            IOUtils.close(fis, bos);
+        }
+        return buffer;
+    }
 
     /**
      * 写文本文件 在Android系统中，文件保存在 /data/data/PACKAGE_NAME/files/ 目录下
@@ -281,20 +326,41 @@ public class FileUtils {
         return "";
     }
 
-    private static String readInStream(FileInputStream inStream) {
+    public static String readText(String path){
+        BufferedReader br = null;
+        StringBuilder sb = new StringBuilder();
         try {
-            ByteArrayOutputStream outStream = new ByteArrayOutputStream();
+            br = new BufferedReader(new FileReader(path));
+            String tem;
+            while ((tem = br.readLine()) != null){
+                sb.append(tem);
+            }
+            return sb.toString();
+        } catch (IOException e) {
+            e.printStackTrace();
+            return null;
+        }finally {
+            IOUtils.close(br);
+        }
+    }
+
+    private static String readInStream(FileInputStream inStream) {
+        ByteArrayOutputStream outStream = null;
+        try {
+            outStream = new ByteArrayOutputStream();
             byte[] buffer = new byte[512];
             int length = -1;
             while ((length = inStream.read(buffer)) != -1) {
                 outStream.write(buffer, 0, length);
             }
-
+            outStream.flush();
             outStream.close();
             inStream.close();
             return outStream.toString();
         } catch (IOException e) {
             Log.i("FileTest", e.getMessage());
+        }finally {
+            IOUtils.close(inStream, outStream);
         }
         return null;
     }
@@ -322,6 +388,7 @@ public class FileUtils {
         try {
             out = new FileOutputStream(file);
             out.write(buffer);
+            out.flush();
             writeSucc = true;
         } catch (Exception e) {
             e.printStackTrace();
@@ -342,6 +409,7 @@ public class FileUtils {
         try {
             out = new FileOutputStream(file);
             out.write(buffer);
+            out.flush();
             writeSucc = true;
         } catch (Exception e) {
             e.printStackTrace();
@@ -354,6 +422,12 @@ public class FileUtils {
         }
 
         return writeSucc;
+    }
+
+    public static boolean copy(String src, String dest){
+        byte[] buffer = FileUtils.getBytes(new File(src));
+        return buffer != null && FileUtils.writeFile(buffer,
+                FileUtils.getFile(dest));
     }
 
     /**
@@ -649,15 +723,15 @@ public class FileUtils {
      * 创建目录
      *
      */
-    public static xyz.fycz.myreader.util.FileUtils.PathStatus createPath(String newPath) {
+    public static PathStatus createPath(String newPath) {
         File path = new File(newPath);
         if (path.exists()) {
-            return xyz.fycz.myreader.util.FileUtils.PathStatus.EXITS;
+            return PathStatus.EXITS;
         }
         if (path.mkdir()) {
-            return xyz.fycz.myreader.util.FileUtils.PathStatus.SUCCESS;
+            return PathStatus.SUCCESS;
         } else {
-            return xyz.fycz.myreader.util.FileUtils.PathStatus.ERROR;
+            return PathStatus.ERROR;
         }
     }
 
@@ -828,5 +902,19 @@ public class FileUtils {
                 }
             }
         }
+    }
+
+    public static String getFileSuffix(String filePath) {
+        File file = new File(filePath);
+        return getFileSuffix(file);
+    }
+
+    public static String getFileSuffix(File file) {
+        if (file == null || !file.exists() || file.isDirectory()) {
+            return "";
+        }
+        String fileName = file.getName();
+        int dotIndex = fileName.lastIndexOf(".");
+        return dotIndex > 0 ? fileName.substring(dotIndex) : "";
     }
 }

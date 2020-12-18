@@ -2,6 +2,7 @@ package xyz.fycz.myreader.ui.activity;
 
 import android.annotation.SuppressLint;
 import android.content.Context;
+import android.content.DialogInterface;
 import android.content.Intent;
 import android.os.Bundle;
 import android.os.Handler;
@@ -9,20 +10,35 @@ import android.os.Message;
 import android.text.Editable;
 import android.text.TextWatcher;
 import android.view.KeyEvent;
+import android.view.Menu;
+import android.view.MenuItem;
 import android.view.View;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.*;
+
+import androidx.appcompat.app.AlertDialog;
+import androidx.appcompat.widget.AppCompatRadioButton;
 import androidx.appcompat.widget.Toolbar;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
+
 import butterknife.BindView;
+
 import com.google.android.material.floatingactionbutton.FloatingActionButton;
 import com.scwang.smartrefresh.layout.SmartRefreshLayout;
+
 import me.gujun.android.taggroup.TagGroup;
 import xyz.fycz.myreader.R;
 import xyz.fycz.myreader.application.MyApplication;
+import xyz.fycz.myreader.application.SysManager;
 import xyz.fycz.myreader.base.BaseActivity;
+import xyz.fycz.myreader.entity.Setting;
+import xyz.fycz.myreader.enums.BookSource;
+import xyz.fycz.myreader.ui.dialog.DialogCreator;
+import xyz.fycz.myreader.ui.dialog.MultiChoiceDialog;
+import xyz.fycz.myreader.util.SharedPreUtils;
+import xyz.fycz.myreader.util.utils.StringUtils;
 import xyz.fycz.myreader.webapi.callback.ResultCallback;
 import xyz.fycz.myreader.common.APPCONST;
 import xyz.fycz.myreader.model.SearchEngine;
@@ -44,6 +60,8 @@ import java.io.UnsupportedEncodingException;
 import java.net.URLEncoder;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 
 /**
@@ -79,6 +97,14 @@ public class SearchBookActivity extends BaseActivity {
     SmartRefreshLayout srlSearchBookList;
     @BindView(R.id.fabSearchStop)
     FloatingActionButton fabSearchStop;
+    @BindView(R.id.rg_search_filter)
+    RadioGroup rbSearchFilter;
+    @BindView(R.id.rb_all_search)
+    AppCompatRadioButton rbAllSearch;
+    @BindView(R.id.rb_fuzzy_search)
+    AppCompatRadioButton rbFuzzySearch;
+    @BindView(R.id.rb_precise_search)
+    AppCompatRadioButton rbPreciseSearch;
 
 
     private SearchBookAdapter mSearchBookAdapter;
@@ -102,6 +128,11 @@ public class SearchBookActivity extends BaseActivity {
     private int confirmTime = 1000;//搜索输入确认时间（毫秒）
 
     private SearchEngine searchEngine;
+
+    private Setting mSetting;
+
+    //选择禁用更新书源对话框
+    private AlertDialog mDisableSourceDia;
 
     private static String[] suggestion = {"第一序列", "大道朝天", "伏天氏", "终极斗罗", "我师兄实在太稳健了", "烂柯棋缘", "诡秘之主"};
     private static String[] suggestion2 = {"不朽凡人", "圣墟", "我是至尊", "龙王传说", "太古神王", "一念永恒", "雪鹰领主", "大主宰"};
@@ -145,10 +176,9 @@ public class SearchBookActivity extends BaseActivity {
     @Override
     protected void initData(Bundle savedInstanceState) {
         super.initData(savedInstanceState);
+        mSetting = SysManager.getSetting();
         mSearchHistoryService = SearchHistoryService.getInstance();
-        for (int i = 0; i < suggestion.length; i++) {
-            mSuggestions.add(suggestion[i]);
-        }
+        Collections.addAll(mSuggestions, suggestion);
 
         searchEngine = new SearchEngine();
         searchEngine.setOnSearchListener(new SearchEngine.OnSearchListener() {
@@ -193,6 +223,38 @@ public class SearchBookActivity extends BaseActivity {
             }
             return false;
         });
+
+        switch (mSetting.getSearchFilter()) {
+            case 0:
+                rbAllSearch.setChecked(true);
+                break;
+            case 1:
+            default:
+                rbFuzzySearch.setChecked(true);
+                break;
+            case 2:
+                rbPreciseSearch.setChecked(true);
+                break;
+        }
+
+        rbSearchFilter.setOnCheckedChangeListener((group, checkedId) -> {
+            int searchFilter;
+            switch (checkedId){
+                case R.id.rb_all_search:
+                default:
+                    searchFilter = 0;
+                    break;
+                case R.id.rb_fuzzy_search:
+                    searchFilter = 1;
+                    break;
+                case R.id.rb_precise_search:
+                    searchFilter = 2;
+                    break;
+            }
+            mSetting.setSearchFilter(searchFilter);
+            SysManager.saveSetting(mSetting);
+        });
+
         //搜索框改变事件
         etSearchKey.addTextChangedListener(new TextWatcher() {
 
@@ -216,6 +278,7 @@ public class SearchBookActivity extends BaseActivity {
             }
 
         });
+
         rvSearchBooksList.setLayoutManager(new LinearLayoutManager(this));
 
         //上拉刷新
@@ -270,6 +333,66 @@ public class SearchBookActivity extends BaseActivity {
     }
 
 
+    @Override
+    public boolean onCreateOptionsMenu(Menu menu) {
+        getMenuInflater().inflate(R.menu.menu_search, menu);
+        return true;
+    }
+
+    @Override
+    public boolean onOptionsItemSelected(MenuItem item) {
+        if (item.getItemId() == R.id.action_disable_source){
+            showDisableSourceDia();
+        }
+        return super.onOptionsItemSelected(item);
+    }
+
+    private void showDisableSourceDia(){
+        if (mDisableSourceDia != null) {
+            mDisableSourceDia.show();
+            return;
+        }
+
+        HashMap<CharSequence, Boolean> mSources = ReadCrawlerUtil.getDisableSources();
+        CharSequence[] mSourcesName = new CharSequence[mSources.keySet().size()];
+        boolean[] isDisables = new boolean[mSources.keySet().size()];
+        int dSourceCount = 0;
+        int i = 0;
+        for (CharSequence sourceName : mSources.keySet()) {
+            mSourcesName[i] = sourceName;
+            Boolean isDisable = mSources.get(sourceName);
+            if (isDisable == null) isDisable = false;
+            if (isDisable) dSourceCount++;
+            isDisables[i++] = isDisable;
+        }
+
+        mDisableSourceDia = new MultiChoiceDialog().create(this, "选择禁用的书源",
+                mSourcesName, isDisables, dSourceCount, (dialog, which) -> {
+                    SharedPreUtils spu = SharedPreUtils.getInstance();
+                    StringBuilder sb = new StringBuilder();
+                    for (CharSequence sourceName : mSources.keySet()) {
+                        if (!mSources.get(sourceName)) {
+                            sb.append(BookSource.getFromName(String.valueOf(sourceName)));
+                            sb.append(",");
+                        }
+                    }
+                    if (sb.lastIndexOf(",") >= 0) sb.deleteCharAt(sb.lastIndexOf(","));
+                    spu.putString(getString(R.string.searchSource), sb.toString());
+                }, null, new DialogCreator.OnMultiDialogListener() {
+                    @Override
+                    public void onItemClick(DialogInterface dialog, int which, boolean isChecked) {
+                        mSources.put(mSourcesName[which], isChecked);
+                    }
+
+                    @Override
+                    public void onSelectAll(boolean isSelectAll) {
+                        for (CharSequence sourceName : mSources.keySet()) {
+                            mSources.put(sourceName, isSelectAll);
+                        }
+                    }
+                });
+    }
+
     /**
      * 初始化建议书目
      */
@@ -312,8 +435,6 @@ public class SearchBookActivity extends BaseActivity {
         llSuggestBooksView.setVisibility(View.GONE);
         llSuggestBooksView.setVisibility(View.GONE);
     }
-
-
 
 
     /**
